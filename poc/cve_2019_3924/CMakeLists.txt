@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
 
 set(PROJECT_NAME nvr_rev_shell)
+set(CXX_STANDARD 20)
 project(${PROJECT_NAME})
 
 set(CMAKE_CXX_FLAGS "-g -O2 -std=c++17 -Wall -Wextra -Weffc++ -Wshadow -Wcast-align -Wcast-qual -Woverloaded-virtual -Wstrict-null-sentinel -Wswitch-default -Winit-self -Wlogical-op -Wno-deprecated-declarations")

